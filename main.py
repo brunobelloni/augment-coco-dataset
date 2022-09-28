@@ -1,31 +1,15 @@
 import glob
 import json
 from itertools import chain
-import random
-
+from tqdm import tqdm
+import asyncio
 import albumentations as A
 import cv2
 import numpy as np
 
-# random.seed(1232132121)  # necessary
-
-DATASET = 'ddr-seg-bbox'
-DATASET_OUT = 'ddr-seg-bbox-crop-4tilesn'
-
-annotation_id = 0
-
-example = {
-    'info': {},
-    'licenses': [],
-    'images': [],  # insert here
-    'annotations': [],  # insert here
-    'categories': [
-        {'supercategory': 'EX', 'id': 1, 'name': 'EX'},
-        {'supercategory': 'HE', 'id': 2, 'name': 'HE'},
-        {'supercategory': 'SE', 'id': 3, 'name': 'SE'},
-        {'supercategory': 'MA', 'id': 4, 'name': 'MA'},
-    ],
-}
+DATASET = 'dataset'
+DATASET_OUT = 'output'
+FOLDER_PATH = f'{DATASET}/**/*.json'
 
 
 def coco2albumentations(segmentation):
@@ -36,12 +20,13 @@ def albumentations2coco(keypoints):
     return list(chain.from_iterable([keypoint[:2] for keypoint in keypoints]))
 
 
-def apply_albumentations(image, annotations, image_id):
-    global annotation_id
+def apply_albumentations(image, annotations, image_id, annotation_id):
+    height, width, _ = image.shape
 
     transform = A.Compose(
         transforms=[
-            # A.RandomResizedCrop(height=height, width=width, always_apply=True),
+            # change to your own transforms
+            A.RandomResizedCrop(height=height, width=width, always_apply=True),
             A.HorizontalFlip(always_apply=True),
         ],
         additional_targets={f"keypoints_{index}": 'keypoints' for index, anno in enumerate(annotations)},
@@ -55,55 +40,61 @@ def apply_albumentations(image, annotations, image_id):
 
     new_annos = []
     for anno, keypoint_name in zip(annotations, keypoint_kwargs):
-        # print(transformed[keypoint_name])
-        keypoints = albumentations2coco(transformed[keypoint_name])
-        parsed_keypoints = np.array(
-            [(keypoints[i], keypoints[i + 1]) for i in range(0, len(keypoints), 2)],
-            dtype='int',
-        )
         annotation_id += 1
+        keypoints = albumentations2coco(transformed[keypoint_name])
+        cv2_keypoints = np.array([(keypoints[i], keypoints[i + 1]) for i in range(0, len(keypoints), 2)], dtype='int')
         new_annos.append({
             'id': annotation_id,
             'image_id': image_id,
             'iscrowd': anno['iscrowd'],
             'segmentation': [keypoints],
             'category_id': anno['category_id'],
-            'area': cv2.contourArea(parsed_keypoints),
-            'bbox': list(cv2.boundingRect(parsed_keypoints)),
+            'area': cv2.contourArea(cv2_keypoints),
+            'bbox': list(cv2.boundingRect(cv2_keypoints)),
         })
 
     return transformed['image'], new_annos
 
 
+def process(image, dataset_type, anno, anno_id):
+    input_image_path = f'{DATASET}/{dataset_type}/{image["file_name"]}'
+    output_image_path = f'{DATASET_OUT}/{dataset_type}/{image["file_name"]}'
+
+    cv2_image = cv2.imread(filename=input_image_path)
+    img_annotations = list(filter(lambda x: x['image_id'] == image['id'], anno['annotations']))
+
+    # start preprocessing
+    transformed_image, transformed_keypoints = apply_albumentations(
+        image=cv2_image,
+        image_id=image['id'],
+        annotation_id=anno_id,
+        annotations=img_annotations,
+    )
+
+    cv2.imwrite(filename=output_image_path, img=transformed_image)
+
+    return transformed_keypoints
+
+
+async def main():
+    for anno_path in glob.iglob(FOLDER_PATH):
+        dataset_type = anno_path.split('/')[1]
+        anno_id = 0
+
+        with open(anno_path, 'r') as f_in:
+            anno = json.load(f_in)
+
+            tasks = [
+                asyncio.to_thread(process, image=image, dataset_type=dataset_type, anno=anno, anno_id=anno_id)
+                for image in tqdm(anno['images'], desc=dataset_type)
+            ]
+            results = await asyncio.gather(*tasks)
+            new_annos = list(chain.from_iterable(results))
+
+            with open(anno_path.replace(DATASET, DATASET_OUT), 'w') as f_out:
+                anno['annotations'] = new_annos
+                json.dump(anno, f_out)
+
+
 if __name__ == '__main__':
-
-    folder_path = 'ddr-seg-bbox/**/*.coco.json'
-
-    for annotation_path in glob.iglob(folder_path):
-        annotation_type = annotation_path.split('/')[1]
-        with open(annotation_path, 'r') as f:
-            annotation = json.load(f)
-
-            for image in annotation['images'][5:]:
-                image_path = f'{DATASET}/{annotation_type}/{image["file_name"]}'
-
-                cv2_image = cv2.imread(filename=image_path)
-                img_annotations = list(filter(lambda x: x['image_id'] == image['id'], annotation['annotations']))
-
-                # start preprocessing
-                new_image, new_annotations = apply_albumentations(
-                    image=cv2_image,
-                    image_id=image['id'],
-                    annotations=img_annotations,
-                )
-
-                cv2.imwrite(filename=image["file_name"], img=new_image)
-
-                example['images'].append(image)
-                example['annotations'].extend(new_annotations)
-
-                with open('data.json', 'w') as f:
-                    json.dump(example, f)
-
-                exit(0)
-
+    asyncio.run(main())
