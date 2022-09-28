@@ -11,6 +11,8 @@ DATASET = 'dataset'
 DATASET_OUT = 'output'
 FOLDER_PATH = '{DATASET}/{DATASET_TYPE}/*.json'
 
+pbar = tqdm()
+
 
 def coco2albumentations(segmentation):
     return [(segmentation[i], segmentation[i + 1], 0, 0) for i in range(0, len(segmentation), 2)]
@@ -73,6 +75,13 @@ def process(image, dataset_type, anno, anno_id):
 
     cv2.imwrite(filename=output_image_path, img=transformed_image)
 
+    if pbar.desc != dataset_type:
+        pbar.reset()
+
+    pbar.total = len(anno['images'])
+    pbar.desc = dataset_type
+    pbar.update(1)
+
     return transformed_keypoints
 
 
@@ -86,7 +95,7 @@ async def main():
 
                 tasks = [
                     asyncio.to_thread(process, image=image, dataset_type=dataset_type, anno=anno, anno_id=anno_id)
-                    for image in tqdm(anno['images'], desc=dataset_type)
+                    for image in anno['images']
                 ]
                 results = await asyncio.gather(*tasks)
                 new_annos = list(chain.from_iterable(results))
