@@ -77,23 +77,23 @@ def process(image, dataset_type, anno, anno_id):
 
 
 async def main():
-    for anno_path in glob.iglob(FOLDER_PATH):
-        dataset_type = anno_path.split('/')[1]
-        anno_id = 0
+    anno_id = 0
 
-        with open(anno_path, 'r') as f_in:
-            anno = json.load(f_in)
+    for dataset_type in ['train', 'valid', 'test']:
+        for anno_path in glob.iglob(FOLDER_PATH.format(DATASET=DATASET, DATASET_TYPE=dataset_type)):
+            with open(anno_path, 'r') as f_in:
+                anno = json.load(f_in)
 
-            tasks = [
-                asyncio.to_thread(process, image=image, dataset_type=dataset_type, anno=anno, anno_id=anno_id)
-                for image in tqdm(anno['images'], desc=dataset_type)
-            ]
-            results = await asyncio.gather(*tasks)
-            new_annos = list(chain.from_iterable(results))
+                tasks = [
+                    asyncio.to_thread(process, image=image, dataset_type=dataset_type, anno=anno, anno_id=anno_id)
+                    for image in tqdm(anno['images'], desc=dataset_type)
+                ]
+                results = await asyncio.gather(*tasks)
+                new_annos = list(chain.from_iterable(results))
 
-            with open(anno_path.replace(DATASET, DATASET_OUT), 'w') as f_out:
-                anno['annotations'] = new_annos
-                json.dump(anno, f_out)
+                with open(anno_path.replace(DATASET, DATASET_OUT), 'w') as f_out:
+                    anno['annotations'] = new_annos
+                    json.dump(anno, f_out)
 
 
 if __name__ == '__main__':
