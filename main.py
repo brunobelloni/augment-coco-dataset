@@ -9,7 +9,7 @@ import numpy as np
 
 DATASET = 'dataset'
 DATASET_OUT = 'output'
-FOLDER_PATH = f'{DATASET}/**/*.json'
+FOLDER_PATH = '{DATASET}/{DATASET_TYPE}/*.json'
 
 
 def coco2albumentations(segmentation):
