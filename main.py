@@ -1,11 +1,15 @@
+import asyncio
 import glob
 import json
+import random
 from itertools import chain
-from tqdm import tqdm
-import asyncio
+
 import albumentations as A
 import cv2
 import numpy as np
+from tqdm import tqdm
+
+random.seed(42)
 
 DATASET = 'dataset'
 DATASET_OUT = 'output'
@@ -20,6 +24,10 @@ def coco2albumentations(segmentation):
 
 def albumentations2coco(keypoints):
     return list(chain.from_iterable([keypoint[:2] for keypoint in keypoints]))
+
+
+def coco2cv2(keypoints):
+    return np.array([(keypoints[i], keypoints[i + 1]) for i in range(0, len(keypoints), 2)], dtype='int')
 
 
 def apply_albumentations(image, annotations, image_id, annotation_id):
@@ -44,7 +52,7 @@ def apply_albumentations(image, annotations, image_id, annotation_id):
     for anno, keypoint_name in zip(annotations, keypoint_kwargs):
         annotation_id += 1
         keypoints = albumentations2coco(transformed[keypoint_name])
-        cv2_keypoints = np.array([(keypoints[i], keypoints[i + 1]) for i in range(0, len(keypoints), 2)], dtype='int')
+        cv2_keypoints = coco2cv2(keypoints)
         new_annos.append({
             'id': annotation_id,
             'image_id': image_id,
@@ -77,9 +85,9 @@ def process(image, dataset_type, anno, anno_id):
 
     if pbar.desc != dataset_type:
         pbar.reset()
+        pbar.total = len(anno['images'])
+        pbar.desc = dataset_type
 
-    pbar.total = len(anno['images'])
-    pbar.desc = dataset_type
     pbar.update(1)
 
     return transformed_keypoints
