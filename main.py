@@ -19,40 +19,36 @@ pbar = tqdm()
 
 
 def coco2albumentations(segmentation):
-    return [(segmentation[i], segmentation[i + 1], 0, 0) for i in range(0, len(segmentation), 2)]
+    return [(segmentation[i], segmentation[i + 1]) for i in range(0, len(segmentation), 2)]
 
 
 def albumentations2coco(keypoints):
-    return list(chain.from_iterable([keypoint[:2] for keypoint in keypoints]))
+    return list(chain.from_iterable(keypoints))
 
 
 def coco2cv2(keypoints):
     return np.array([(keypoints[i], keypoints[i + 1]) for i in range(0, len(keypoints), 2)], dtype='int')
 
 
-def apply_albumentations(image, annotations, image_id, annotation_id):
-    height, width, _ = image.shape
-
-    transform = A.Compose(
-        transforms=[
-            # change to your own transforms
-            A.RandomResizedCrop(height=height, width=width, always_apply=True),
-            A.HorizontalFlip(always_apply=True),
-        ],
-        additional_targets={f"keypoints_{index}": 'keypoints' for index, anno in enumerate(annotations)},
-    )
-
+def apply_albumentations(image, annotations, image_id, annotation_id, transforms):
     keypoint_kwargs = {
         f"keypoints_{index}": coco2albumentations(anno['segmentation'][0]) for index, anno in enumerate(annotations)
     }
 
-    transformed = transform(image=image, **keypoint_kwargs)
+    transform = A.Compose(
+        transforms=transforms,
+        keypoint_params=A.KeypointParams(format='xy'),
+        additional_targets={f"keypoints_{index}": 'keypoints' for index, anno in enumerate(annotations)},
+    )
+    transformed = transform(image=image, keypoints=[], **keypoint_kwargs)
 
     new_annos = []
     for anno, keypoint_name in zip(annotations, keypoint_kwargs):
         annotation_id += 1
         keypoints = albumentations2coco(transformed[keypoint_name])
         cv2_keypoints = coco2cv2(keypoints)
+        if not keypoints or len(keypoints) <= 4:
+            continue
         new_annos.append({
             'id': annotation_id,
             'image_id': image_id,
@@ -73,10 +69,18 @@ def process(image, dataset_type, anno, anno_id):
     cv2_image = cv2.imread(filename=input_image_path)
     img_annotations = list(filter(lambda x: x['image_id'] == image['id'], anno['annotations']))
 
+    height, width, _ = cv2_image.shape
+    transforms = [
+        # change to your own transforms
+        A.RandomResizedCrop(height=height, width=width, always_apply=True),
+        A.HorizontalFlip(always_apply=True),
+    ]
+
     # start preprocessing
     transformed_image, transformed_keypoints = apply_albumentations(
         image=cv2_image,
         image_id=image['id'],
+        transforms=transforms,
         annotation_id=anno_id,
         annotations=img_annotations,
     )
